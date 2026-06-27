@@ -10,8 +10,64 @@ const ABA_LN = "Base Analise LN";
 const ABA_DIAG = "Diagnostico ISS";
 const ABA_DIM_MUNICIPIO = "DIM_MUNICIPIO";
 
+// =====================================================
+// LEITURA DINÂMICA DE CABEÇALHOS
+// =====================================================
+
+function criarSchema(cabecalho) {
+
+  const schema = {};
+
+  cabecalho.forEach((nome, index) => {
+
+    const chave = String(nome || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g,"")
+      .toUpperCase()
+      .trim()
+      .replace(/\s+/g,"_");
+
+    schema[chave] = index;
+
+  });
+
+
+  return schema;
+}
+
+
+
+function localizarColuna(schema, nomesPossiveis) {
+
+
+  for (let nome of nomesPossiveis) {
+
+    const chave = nome
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g,"")
+      .toUpperCase()
+      .trim()
+      .replace(/\s+/g,"_");
+
+
+    if (schema[chave] !== undefined) {
+
+      return schema[chave];
+
+    }
+
+  }
+
+
+  return null;
+
+}
+
+// CACHE MUNICÍPIOS NORMALIZADOS
+let MAPA_MUNICIPIOS = {};
+
 // ---------- Controle ----------
-const ATIVAR_GUEPARDO = false;
+const ATIVAR_GUEPARDO = true;
 
 // ---------- Colunas que serão localizadas dinamicamente ----------
 const HEADERS = {
@@ -77,14 +133,28 @@ function ocultarDimMunicipio(ss) {
 // NORMALIZAÇÃO
 // ======================================================
 
-function getValorPL(r) {
-  if (!r || r.length < 16) return 0; // 🔥 proteção crítica
+function getValorPL(r, PL) {
 
-  const iss = parseMoney(r[13] || 0);
-  const multa = parseMoney(r[14] || 0);
-  const juros = parseMoney(r[15] || 0);
+  if (!r || !PL) return 0;
+
+
+  const iss = parseMoney(
+    r[PL.VALOR_PRINCIPAL] || 0
+  );
+
+
+  const multa = parseMoney(
+    r[PL.MULTA] || 0
+  );
+
+
+  const juros = parseMoney(
+    r[PL.JUROS] || 0
+  );
+
 
   return iss + multa + juros;
+
 }
 
 function normDoc(doc) {
@@ -206,7 +276,9 @@ function gerarCompetenciasExpandida(comp) {
 }
 
 function normalizarMunicipioComparacao(m) {
+
   let mun = normMunicipioFull(m);
+
 
   // remove palavras comuns adicionais
   mun = mun
@@ -226,11 +298,17 @@ function normalizarMunicipioComparacao(m) {
     .replace(/\s+/g, " ")
     .trim();
 
-  if (MUNICIPIO_MAP[mun]) {
-    return MUNICIPIO_MAP[mun];
+
+  // usa mapa carregado da aba Dim Município
+  if (MAPA_MUNICIPIOS[mun]) {
+
+    return MAPA_MUNICIPIOS[mun];
+
   }
 
+
   return mun;
+
 }
 
 
@@ -240,8 +318,8 @@ function normMunicipioFull(x) {
     .replace(/\u00A0/g, " ")
     .replace(/\t/g, " ")
     .replace(/\s+/g, " ")
-    .replace(/[-/().]/g, " ") // remove símbolos comuns
-    .replace(/\bSP\b/g, "")   // remove UF solta
+    .replace(/[-/().]/g, " ")
+    .replace(/\bSP\b/g, "")
     .replace(/\bRJ\b/g, "")
     .replace(/\bMG\b/g, "")
     .replace(/\bPR\b/g, "")
@@ -257,10 +335,99 @@ function normMunicipioFull(x) {
     .trim();
 }
 
+function carregarMapaMunicipios() {
+
+  const mapa = {};
+
+  try {
+
+    const ss = SpreadsheetApp.getActive();
+
+    const aba = ss.getSheetByName(ABA_DIM_MUNICIPIO);
+
+
+    if (!aba) {
+
+      Logger.log("⚠️ Aba DIM_MUNICIPIO não encontrada");
+
+      return mapa;
+
+    }
+
+
+    const dados = aba.getDataRange().getValues();
+
+
+    for (let i = 1; i < dados.length; i++) {
+
+
+      const origem = normMunicipioFull(dados[i][0]);
+
+      const destino = normMunicipioFull(dados[i][1]);
+
+
+      if (origem && destino) {
+
+        mapa[origem] = destino;
+
+      }
+
+    }
+
+
+    Logger.log(
+      "✅ Municípios carregados: " + Object.keys(mapa).length
+    );
+
+
+    return mapa;
+
+
+  } catch(e) {
+
+
+    Logger.log("🚨 ERRO carregarMapaMunicipios");
+
+    Logger.log(e);
+
+
+    return mapa;
+
+  }
+
+}
 
 // ======================================================
 // CORE
 // ======================================================
+
+function localizarColunas(sheet, linhaCabecalho = 2) {
+
+  const headers = sheet
+    .getRange(linhaCabecalho, 1, 1, sheet.getLastColumn())
+    .getValues()[0];
+
+  const mapa = {};
+
+  headers.forEach((h, i) => {
+    mapa[norm(h)] = i;
+  });
+
+  return mapa;
+}
+
+function idx(mapa, nome) {
+
+  const coluna = mapa[norm(nome)];
+
+  if (coluna === undefined) {
+    throw new Error("Cabeçalho não encontrado: " + nome);
+  }
+
+  return coluna;
+}
+
+
 function cruzarISS() {
 
   const stats = {
@@ -287,6 +454,7 @@ function cruzarISS() {
   Logger.log("=================================");
   Logger.log("🚀 INÍCIO CONCILIAÇÃO ISS");
   Logger.log("=================================");
+  MAPA_MUNICIPIOS = carregarMapaMunicipios();
 
   const diagnosticoMap = {};
   const usadosGlobal = new Set(); // 🔥 controle único de consumo
@@ -330,15 +498,66 @@ function cruzarISS() {
   // ========================
   // PL
   // ========================
-  const PL = {
-    EMP: 2,
-    LN: 5,
-    COMP: 6,
-    MUN: 3,
-    SIST: 1,
-    VAL: 16,
-    DOC: 19
-  };
+  const HPL = localizarColunas(pl);
+
+const PL = {
+
+  EMP: localizarColuna(headersPL,
+  [
+    "EMPRESA",
+    "EMP"
+  ]),
+
+
+  LN: localizarColuna(headersPL,
+  [
+    "LN",
+    "LOCAL NEGOCIO",
+    "LOCAL DE NEGOCIO"
+  ]),
+
+
+  MUN: localizarColuna(headersPL,
+  [
+    "MUNICIPIO",
+    "MUNICÍPIO"
+  ]),
+
+
+  COMP: localizarColuna(headersPL,
+  [
+    "COMPETENCIA",
+    "PERIO APUR",
+    "PERIO_APUR"
+  ]),
+
+
+  SIST: localizarColuna(headersPL,
+  [
+    "SISTEMA"
+  ]),
+
+
+  VALOR_PRINCIPAL: localizarColuna(headersPL,
+  [
+    "VALOR PRINCIPAL"
+  ]),
+
+
+  MULTA: localizarColuna(headersPL,
+  [
+    "MULTA - 337006",
+    "MULTA"
+  ]),
+
+
+  JUROS: localizarColuna(headersPL,
+  [
+    "JUROS - 361003",
+    "JUROS"
+  ])
+
+};
 
   // 🔥 DEBUG - TOTAL PL USADO NO CÓDIGO
   Logger.log("TOTAL PL (código): " + plData.reduce((s, r) => s + getValorPL(r), 0));
@@ -482,15 +701,30 @@ function cruzarISS() {
   // ========================
   // GUEPARDO
   // ========================
+  const HG = localizarColunas(g);
+
   const G = {
-    EMP: 3,
-    LN: 5,
-    COMP: 8,
-    MUN: 6,
-    SIST: 2,
-    VAL: 18,
-    DOC: 27,
-    TIPO_GUIA: 1
+
+    SIST: idx(HG, "Sistema"),
+
+    EMP_COD: idx(HG, "Cod Emp"),
+
+    EMP: idx(HG, "Empresa"),
+
+    LN: idx(HG, "LN"),
+
+    MUN: idx(HG, "Munic. Recolhimento"),
+
+    COMP: idx(HG, "Competência NF"),
+
+    VAL: idx(HG, "Valor ISS"),
+
+    DOC: idx(HG, "Doc Guia"),
+ 
+    TIPO_GUIA: idx(HG, "PA"),
+
+    DOC_PL: idx(HG, "Doc Guia PL")
+
   };
 
   const map = {};
@@ -1743,28 +1977,77 @@ ${explicacao}`;
   }
 
 
-  function buildKeyCompleta(r, schema) {
-    try {
-      const emp = safe(r[schema.EMP]);
-      const ln = normLN(r[schema.LN]);
-      const mun = normalizarMunicipioComparacao(r[schema.MUN]);
-      const comp = normalizarCompetencia(mmYYYY(r[schema.COMP]));
-      const sist = normalizarSistema(r[schema.SIST]);
+ function buildKeyCompleta(r, schema) {
 
-      if (!emp || ln === "0000" || !mun || comp === "SEM_COMP") {
-        Logger.log("🚨 DADOS INSUFICIENTES:");
-        Logger.log(r);
-        return null;
-      }
+  let emp, ln, mun, comp, sist;
 
-      return [emp, ln, mun, comp, sist].join("|");
-
-    } catch (e) {
-      Logger.log("🚨 ERRO buildKeyCompleta:");
-      Logger.log(r);
-      return null;
-    }
+  try {
+    emp = safe(r[schema.EMP]);
+  } catch(e){
+    Logger.log("ERRO EMP");
+    Logger.log(e);
+    Logger.log(r);
+    return null;
   }
+
+  try {
+    ln = normLN(r[schema.LN]);
+  } catch(e){
+    Logger.log("ERRO LN");
+    Logger.log(e);
+    Logger.log(r);
+    return null;
+  }
+
+  try {
+    mun = normalizarMunicipioComparacao(r[schema.MUN]);
+  } catch(e){
+    Logger.log("ERRO MUNICIPIO");
+    Logger.log(e);
+    Logger.log(r);
+    return null;
+  }
+
+  try {
+    comp = normalizarCompetencia(mmYYYY(r[schema.COMP]));
+  } catch(e){
+    Logger.log("ERRO COMPETENCIA");
+    Logger.log(e);
+    Logger.log(r);
+    return null;
+  }
+
+  try {
+    sist = normalizarSistema(r[schema.SIST]);
+  } catch(e){
+    Logger.log("ERRO SISTEMA");
+    Logger.log(e);
+    Logger.log(r);
+    return null;
+  }
+
+  // Sem empresa ou LN não existe possibilidade de cruzamento
+if (!emp || ln === "0000") {
+    return null;
+}
+
+
+// Competência é obrigatória
+if (comp === "SEM_COMP") {
+    return null;
+}
+
+
+// Monta chave completa quando possível
+return [
+  emp,
+  ln,
+  mun || "",
+  comp || "",
+  sist || ""
+
+].join("|");
+}
 
   function gerarChavesPriorizadas(key) {
     const [emp, ln, mun, comp, sist] = key.split("|");
@@ -2760,23 +3043,99 @@ function processarGuepardo() {
   }
 
   // Carrega dados do PL para indexação (melhora performance)
-  const dadosPL = abaPL.getDataRange().getValues();
+  const PL = criarSchemaDinamico(abaPL);
+
+const dadosPL = PL.dados;
+const schemaPL = PL.schema;
   const indexPL = {}; // Chave: LN + Competência + Valor
+
+  const cabecalhoPL = dadosPL[0];
+
+const schemaPLBase = criarSchema(cabecalhoPL);
+
+
+const schemaPL = {
+
+  EMP: localizarColuna(schemaPLBase,
+  ["EMPRESA","EMP","COD_EMPRESA"]),
+
+  LN: localizarColuna(schemaPLBase,
+  ["LN","LOCAL_NEGOCIO","LOCAL DE NEGOCIO"]),
+
+  COMP: localizarColuna(schemaPLBase,
+  ["COMPETENCIA","PERIO_APUR","PERIO APUR"]),
+
+  MUN: localizarColuna(schemaPLBase,
+  ["MUNICIPIO","MUNICÍPIO"]),
+
+  VALOR: localizarColuna(schemaPLBase,
+  ["VALOR","VALOR_ISS","ISS"])
+
+};
+
+
+Logger.log("SCHEMA PL");
+Logger.log(schemaPL);
 
   // Pula cabeçalho do PL (considerando linha 2 como início dos dados úteis)
   for (let i = 2; i < dadosPL.length; i++) {
     const linhaPL = dadosPL[i];
-    const valorTotalPL = getValorPL(linhaPL);
-    const lnPL = normLN(linhaPL[5]); // Coluna F (Índice 5)
-    const compPL = String(linhaPL[6]).trim(); // Perio Apur (Índice 6)
+    const valorTotalPL = getValorPL(linhaPL, PL);
+    const lnPL = normLN(
+  linhaPL[schemaPL.LN]
+);
+
+
+const compPL = String(
+  linhaPL[schemaPL.COMP]
+).trim();
 
     const chave = `${lnPL}_${compPL}_${valorTotalPL.toFixed(2)}`;
-    indexPL[chave] = linhaPL;
+
+Logger.log("EXEMPLO CHAVE PL");
+Logger.log(chave);
+
+indexPL[chave] = linhaPL;
   }
 
   // Processamento do Guepardo
-  const dadosG = abaG.getDataRange().getValues();
+  const G = criarSchemaDinamico(abaG);
+
+const dadosG = G.dados;
+const schemaG = G.schema;
   const resultados = [];
+
+  const cabecalhoG = dadosG[0];
+
+const schemaGBase = criarSchema(cabecalhoG);
+
+
+const schemaG = {
+
+  EMP: localizarColuna(schemaGBase,
+  ["EMPRESA","EMP","COD_EMPRESA"]),
+
+
+  LN: localizarColuna(schemaGBase,
+  ["LN","LOCAL_NEGOCIO","LOCAL DE NEGOCIO"]),
+
+
+  MUN: localizarColuna(schemaGBase,
+  ["MUNICIPIO","MUNICÍPIO","Munic. Recolhimento"]),
+
+
+  COMP: localizarColuna(schemaGBase,
+  ["COMPETENCIA","PERIO_APUR"]),
+
+
+  VALOR: localizarColuna(schemaGBase,
+  ["VALOR","ISS","VALOR_ISS","Valor ISS"])
+
+};
+
+
+Logger.log("SCHEMA GUEPARDO");
+Logger.log(schemaG);
 
   // Início do loop (pula cabeçalho)
   for (let i = 2; i < dadosG.length; i++) {
@@ -2830,36 +3189,6 @@ function processarGuepardo() {
   Logger.log("Processamento concluído: " + resultados.length + " linhas escrituradas processadas.");
 }
 
-
-function resolverMunicipio(input) {
-  if (!input) return "NA";
-
-  const listaMunicipios = carregarMunicipios();
-  let m = normMunicipioFull(input);
-
-  // 1. Tentativa de Mapeamento Direto ou Normalizado
-  if (MUNICIPIO_MAP[m]) return MUNICIPIO_MAP[m];
-  if (listaMunicipios.includes(m)) return m;
-
-  // 2. Limpeza de ruído (Prefeitura, Município, etc)
-  let mLimpo = m
-    .replace(/\bPREFEITURA\b/g, "")
-    .replace(/\bMUNICIPIO\b/g, "")
-    .replace(/\bSECRETARIA\b/g, "")
-    .replace(/\bDA\b|\bDE\b|\bDO\b/g, "")
-    .trim();
-
-  // 3. Busca por aproximação (Se o que o usuário digitou está contido em algum município da base)
-  const matchContem = listaMunicipios.find(nomeBase =>
-    nomeBase.includes(mLimpo) || mLimpo.includes(nomeBase)
-  );
-
-  if (matchContem) return matchContem;
-
-  // 4. Último recurso: Se ainda for "NA", mas o Guepardo tiver algo, 
-  // tentamos manter o valor original do input normalizado para não bloquear o match
-  return mLimpo || "NA";
-}
 
 function encontrarMatch(itemGuepardo, indexPL) {
   const lnG = normLN(itemGuepardo.ln);
@@ -3162,6 +3491,45 @@ function executarMatchComErro(gRow, indexPL_lnValor, usadosGlobal) {
   return null;
 }
 
-/*Hoje o foco foi estabilizar o fluxo de links entre Guepardo, Base de Conciliação e PL. Identifiquei três problemas principais: (1) nem todos os documentos do Guepardo estavam sendo transformados em links na base de conciliação, (2) a base de conciliação não estava exibindo todos os documentos mesmo com o cruzamento e o writeback funcionando, e (3) o writeback do Guepardo para a PL não estava levando todos os documentos que já existiam corretamente na base.
+function removerAcentos(texto) {
 
-Diante disso, optei por pausar temporariamente o writeback do Guepardo para a PL. Essa decisão foi necessária para evitar sobrescrita incorreta e perda de dados enquanto trato as inconsistências já mapeadas no fluxo de propagação dos documentos. O objetivo agora é garantir primeiro a integridade completa dos dados na base de conciliação e, só depois, reativar o writeback com segurança.*/
+  if (!texto) return "";
+
+  return texto
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+}
+
+function criarSchemaDinamico(aba){
+
+  const dados = aba.getDataRange().getValues();
+
+  const cab = dados[0];
+
+  const schema = {};
+
+  cab.forEach((titulo,index)=>{
+
+    const nome = String(titulo || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g,"")
+      .toUpperCase()
+      .trim();
+
+    schema[nome] = index;
+
+  });
+
+
+  return {
+    dados:dados,
+    schema:schema
+  };
+
+}
+
+
+/*17:16Teste27/06 1.0
+*/
