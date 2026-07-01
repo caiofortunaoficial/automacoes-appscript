@@ -3049,30 +3049,6 @@ const dadosPL = PL.dados;
 const schemaPL = PL.schema;
   const indexPL = {}; // Chave: LN + Competência + Valor
 
-  const cabecalhoPL = dadosPL[0];
-
-const schemaPLBase = criarSchema(cabecalhoPL);
-
-
-const schemaPL = {
-
-  EMP: localizarColuna(schemaPLBase,
-  ["EMPRESA","EMP","COD_EMPRESA"]),
-
-  LN: localizarColuna(schemaPLBase,
-  ["LN","LOCAL_NEGOCIO","LOCAL DE NEGOCIO"]),
-
-  COMP: localizarColuna(schemaPLBase,
-  ["COMPETENCIA","PERIO_APUR","PERIO APUR"]),
-
-  MUN: localizarColuna(schemaPLBase,
-  ["MUNICIPIO","MUNICÍPIO"]),
-
-  VALOR: localizarColuna(schemaPLBase,
-  ["VALOR","VALOR_ISS","ISS"])
-
-};
-
 
 Logger.log("SCHEMA PL");
 Logger.log(schemaPL);
@@ -3104,34 +3080,6 @@ indexPL[chave] = linhaPL;
 const dadosG = G.dados;
 const schemaG = G.schema;
   const resultados = [];
-
-  const cabecalhoG = dadosG[0];
-
-const schemaGBase = criarSchema(cabecalhoG);
-
-
-const schemaG = {
-
-  EMP: localizarColuna(schemaGBase,
-  ["EMPRESA","EMP","COD_EMPRESA"]),
-
-
-  LN: localizarColuna(schemaGBase,
-  ["LN","LOCAL_NEGOCIO","LOCAL DE NEGOCIO"]),
-
-
-  MUN: localizarColuna(schemaGBase,
-  ["MUNICIPIO","MUNICÍPIO","Munic. Recolhimento"]),
-
-
-  COMP: localizarColuna(schemaGBase,
-  ["COMPETENCIA","PERIO_APUR"]),
-
-
-  VALOR: localizarColuna(schemaGBase,
-  ["VALOR","ISS","VALOR_ISS","Valor ISS"])
-
-};
 
 
 Logger.log("SCHEMA GUEPARDO");
